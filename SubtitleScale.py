@@ -14,6 +14,22 @@ import time
 
 CRLF = '\r\n'
 
+####################################################################################
+## Código para adivinar codificación. Copiado de StackOverflow:
+## http://stackoverflow.com/questions/8466460/how-to-read-a-file-that-can-be-saved-as-either-ansi-or-unicode-in-python
+import locale
+
+def guess_notepad_encoding(filepath, default_ansi_encoding=None):
+    with open(filepath, 'rb') as f:
+        data = f.read(3)
+    if data[:2] in ('\xff\xfe', '\xfe\xff'):
+        return 'utf-16'
+    if data == u''.encode('utf-8-sig'):
+        return 'utf-8-sig'
+    # presumably "ANSI"
+    return default_ansi_encoding or locale.getpreferredencoding()
+####################################################################################
+
 def procesar_texto(tx):
     """Crear una lista con los subtítulos. Cada elemento de la lista
 es una lista con el número, el tiempo de inicio, el tiempo final y el texto"""
@@ -54,8 +70,11 @@ def procesar_instante(str_t):
         print('Error raro')
         sys.exit()
 
-    s, ms = s.split(',')
-
+    try:
+        s, ms = s.split(',')
+    except:
+        ms = "000"
+    
     h = int(h)
     m = int(m)
     s = int(s)
@@ -66,7 +85,12 @@ def procesar_instante(str_t):
 
 def instante_a_str(ts):
     """Devolver formato hh:mm:ss,nnn a un tiempo en segundos"""
-    return str(timedelta(seconds=ts))[:-3].replace('.', ',')    ## 3 decimales sólo, y con (,) en vez de (.)
+    str_timedelta = str(timedelta(seconds=ts))
+    #print(str_timedelta)
+    if '.' in str_timedelta:
+        return str_timedelta[:-3].replace('.', ',')    ## 3 decimales sólo, y con (,) en vez de (.)
+    else:
+        return str_timedelta + ',000'
 
 
 def procesar(tx, tv0, tv1):
@@ -119,12 +143,32 @@ def main():
     parser.add_argument('infile', help='Fichero de subtítulos (extensión .srt)')
     parser.add_argument('v1', help='Tiempo en el vídeo del primer subtítulo (formato hh:mm:ss,nnn)')
     parser.add_argument('v2', help='Tiempo en el vídeo del último subtítulo (formato hh:mm:ss,nnn)')
+    parser.add_argument('-oe','--output-encoding',
+                        help='Formato codificación fichero salida: ansi, utf8, auto. Por defecto, auto (misma codificación fichero de entrada)',
+                        choices=['ansi', 'utf8', 'auto'],
+                        default='auto', required=False)
+    
     args = parser.parse_args()
 
+    print(args)
+    print(args.output_encoding)
+    
+    ## Detección de la codificación
+    encoding = guess_notepad_encoding(args.infile)
+    print("Fichero de entrada %s codificado con %s" % (args.infile, encoding))
+    if args.output_encoding == 'auto':
+        args.output_encoding =  enc
+        print("El fichero de salida se codificará igual que el de entrada")
+    if args.output_encoding == "ansi":
+        args.output_encoding =  "cp1252"    ## Mejor suposición, en mi caso
+        print("El fichero de salida se codificará con codificación por defecto")
+    if args.output_encoding == "utf8":
+        args.output_encoding =  "utf-8-sig"
+        print("El fichero de salida se codificará como utf-8")
+    
     try:
-        f = codecs.open(args.infile, 'r', encoding='UTF-8')
-        texto = f.read()[1:]    ## Quitar el BOM
-        f.close()
+        with codecs.open(args.infile, 'r', encoding=encoding) as f:
+            texto = f.read()
     except Exception as e:
         print('Error en la apertura del fichero', e)
         sys.exit()
@@ -135,11 +179,13 @@ def main():
     
     salida = procesar(tx, v1, v2)
 
-    print(salida)
+    # print(salida)
 
-    f = codecs.open(args.infile + '.out', 'w', encoding='UTF-8')
+    f = codecs.open(args.infile + '.out', 'w', encoding=encoding)
     f.write(CRLF.join(salida))
     f.close()
+
+    print("Fichero de salida %s generado correctamente" % (args.infile + '.out',))
     
 #----------------------------------------------------------------------------
 main()
